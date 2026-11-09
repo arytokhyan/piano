@@ -101,6 +101,11 @@ dialog h2{font-family:var(--font-display);margin:0 0 4px;font-size:24px;letter-s
 .field label{font-weight:600;font-size:14px}
 .field .hint{font-size:13px;color:var(--muted)}
 .field select,.field input[type=range]{width:100%}
+.choices{display:grid;gap:8px;margin:16px 0 4px}
+.choice{display:grid;gap:3px;text-align:left;border:1px solid var(--line);background:var(--surface-2);border-radius:10px;padding:11px 13px;cursor:pointer}
+.choice b{font-family:var(--font-display);font-size:16px}
+.choice span{font-size:13px;color:var(--muted);line-height:1.4}
+.choice[aria-pressed="true"]{border-color:var(--felt);background:var(--felt-soft)}
 .check{display:flex;gap:10px;align-items:center;margin:10px 0;font-size:14px}
 #proj{position:fixed;inset:0;background:#000;z-index:50}
 #projCanvas{position:absolute;inset:0;width:100%;height:100%}
@@ -125,14 +130,13 @@ dialog h2{font-family:var(--font-display);margin:0 0 4px;font-size:24px;letter-s
     <button id="menuBtn" class="icon-btn" aria-label="Show lessons">☰</button>
     <div class="brand"><i></i>Piano Coach</div>
     <div class="spacer"></div>
-    <button id="micBtn" class="btn primary">Turn on microphone</button>
+    <button id="micBtn" class="btn primary">Connect piano</button>
     <button id="projBtn" class="btn hide-narrow">Projector view</button>
     <button id="setBtn" class="btn">Settings</button>
   </header>
   <div class="main">
     <nav id="lessons" class="lessons" aria-label="Lessons"></nav>
     <section class="stage">
-      <div id="micBanner" class="banner" hidden></div>
       <div class="prompt-row">
         <div class="prompt">
           <div class="eyebrow" id="stepCount">Step 1 of 1</div>
@@ -174,6 +178,23 @@ dialog h2{font-family:var(--font-display);margin:0 0 4px;font-size:24px;letter-s
     <button class="btn" id="againBtn">Play again</button>
     <button class="btn primary" id="nextBtn">Next lesson</button>
   </div>
+</dialog>
+
+<dialog id="inDlg">
+  <h2>Connect your piano</h2>
+  <div class="lesson-desc">Choose how the app hears you. A digital piano with MIDI gives perfect results.</div>
+  <div class="choices">
+    <button class="choice" id="inMidi"><b>MIDI</b><span>USB cable or Bluetooth MIDI from a digital piano. Exact notes, no room noise.</span></button>
+    <button class="choice" id="inLine"><b>Audio cable</b><span>Piano's line or headphone output into an audio interface. Clean sound, notes are still worked out from the audio.</span></button>
+    <button class="choice" id="inMic"><b>Microphone</b><span>Works with any piano. Best in a quiet room.</span></button>
+  </div>
+  <div class="field" id="devField" hidden>
+    <label for="devSel">Audio input</label>
+    <select id="devSel"></select>
+    <div class="hint">On iPad, a plugged-in audio interface is usually chosen automatically.</div>
+  </div>
+  <div class="banner" id="inMsg" hidden></div>
+  <div class="row"><button class="btn" id="inOff">Turn input off</button><button class="btn primary" id="inClose">Done</button></div>
 </dialog>
 
 <dialog id="setDlg">
@@ -223,7 +244,7 @@ const Store = {
   get(k, d){ try{ const v = localStorage.getItem('pc.'+k); return v==null? d : JSON.parse(v); }catch(e){ return d; } },
   set(k, v){ try{ localStorage.setItem('pc.'+k, JSON.stringify(v)); }catch(e){} }
 };
-const settings = Object.assign({sens:6, naming:'letters', anyOct:false, tapSound:true, showNext:true}, Store.get('settings', {}));
+const settings = Object.assign({input:'', deviceId:'', sens:6, naming:'letters', anyOct:false, tapSound:true, showNext:true}, Store.get('settings', {}));
 const saveSettings = () => Store.set('settings', settings);
 
 /* ---------- Music helpers ---------- */
@@ -282,10 +303,12 @@ const Synth = {
 const Listener = {
   on:false, an:null, freq:null, time:null, binHz:1, sr:48000,
   levelHist:[], lastOnset:-1e9, preOnset:new Set(), LO:28, HI:100, sal:new Float32Array(128), fund:new Float32Array(128), odd:new Float32Array(128), even:new Float32Array(128),
-  async start(){
-    const ctx = audio();
+  async start(deviceId){
+    const ctx = audio(); this.stop();
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nomedia');
-    const stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
+    const audioC = {echoCancellation:false, noiseSuppression:false, autoGainControl:false};
+    if(deviceId) audioC.deviceId = {exact:deviceId};
+    const stream = await navigator.mediaDevices.getUserMedia({audio:audioC});
     const src = ctx.createMediaStreamSource(stream);
     const an = ctx.createAnalyser(); an.fftSize = 16384; an.smoothingTimeConstant = 0; an.minDecibels=-120; an.maxDecibels=0;
     src.connect(an);
@@ -293,6 +316,7 @@ const Listener = {
     this.freq = new Float32Array(an.frequencyBinCount); this.mag = new Float32Array(an.frequencyBinCount);
     this.time = new Float32Array(2048); this.on = true; this.stream = stream;
   },
+  stop(){ if(this.stream){ this.stream.getTracks().forEach(t=>t.stop()); } this.stream=null; this.on=false; },
   peak(f){
     const c = f/this.binHz; if(c >= this.mag.length-2) return 0;
     const w = Math.max(1, c*0.012); let mx = 0;
@@ -343,12 +367,38 @@ const Listener = {
   }
 };
 
-/* ---------- Virtual input (tapping the on-screen keyboard) ---------- */
+/* ---------- Exact inputs: on-screen taps and MIDI ----------
+   Both report which keys are down and when each was pressed, so drills can
+   tell a new wrong note from a key still held over from the last step.   */
 const Virtual = {
   held:new Map(), lastPress:0,
-  press(m){ this.held.set(m, performance.now()+1400); this.lastPress = performance.now(); if(settings.tapSound) Synth.play([m], 0.9, 0, 0.18); },
-  active(now){ for(const [m,t] of this.held) if(t<now) this.held.delete(m); return [...this.held.keys()]; },
+  press(m){ const t=performance.now(); this.held.set(m, {exp:t+1400, t}); this.lastPress = t; if(settings.tapSound) Synth.play([m], 0.9, 0, 0.18); },
+  active(now, out){ for(const [m,k] of this.held){ if(k.exp<now) this.held.delete(m); else out.set(m,k.t); } },
   clear(){ this.held.clear(); }
+};
+const Midi = {
+  on:false, held:new Map(), recent:new Map(), lastPress:0, names:[],
+  supported(){ return !!navigator.requestMIDIAccess; },
+  async start(){
+    if(!this.supported()) { const e=new Error('nomidi'); e.name='NoMIDI'; throw e; }
+    const acc = await navigator.requestMIDIAccess();
+    const hook = () => { this.names=[]; for(const inp of acc.inputs.values()){ inp.onmidimessage = e=>this.msg(e.data); this.names.push(inp.name); } Bus.emit('input'); };
+    acc.onstatechange = hook; hook(); this.on = true;
+  },
+  msg(d){
+    const type=d[0]&0xF0, n=d[1], vel=d[2], t=performance.now();
+    if(type===0x90 && vel>0){ this.held.set(n,t); this.recent.set(n,t); this.lastPress=t; }
+    else if(type===0x80 || (type===0x90 && vel===0)) this.held.delete(n);
+  },
+  active(now, out, since){
+    for(const [m,t] of this.held) out.set(m,t);
+    // a quick staccato note still counts for a moment after release, but only toward the step it was played in
+    for(const [m,t] of this.recent){ if(now-t>250) this.recent.delete(m); else if(t>since && !out.has(m)) out.set(m,t); }
+  }
+};
+const Keys = {
+  active(now, since=0){ const out=new Map(); Virtual.active(now,out); Midi.active(now,out,since); return out; },
+  get lastPress(){ return Math.max(Virtual.lastPress, Midi.lastPress); }
 };
 
 /* ---------- Lessons ----------
@@ -432,7 +482,7 @@ const Engine = {
   beginStep(){
     this.okFrames=0; this.wrongFrames.clear(); this.stepStart=performance.now();
     const cur=this.steps[this.idx], prev=this.steps[this.idx-1];
-    this.needOnset = !!(cur && prev && cur.notes.some(n=>prev.notes.some(p=>p.m===n.m)));
+    this.needOnset = this.idx===0 || !!(cur && prev && cur.notes.some(n=>prev.notes.some(p=>p.m===n.m)));  // first step: ignore notes still ringing from before
     this.publish();
   },
   targets(){ const s=this.steps[this.idx]; return s? s.notes.map(n=>n.m) : []; },
@@ -459,24 +509,24 @@ const Engine = {
   },
   tick(now){
     const fr = Listener.analyze(now);
-    const v = Virtual.active(now);
+    const ex = Keys.active(now, this.stepStart), v = [...ex.keys()];
     const heard = [...new Set([...(fr? fr.heard: []), ...v])].sort((a,b)=>a-b);
     this.heard = heard; this.level = fr? fr.level : -100;
     if(this.lesson && !this.lesson.free && !this.done && now > this.muteUntil){
       const T = this.targets();
       const anyOct = settings.anyOct && T.length>=3;
       const has = m => v.includes(m) || (fr && (fr.present(m) || (anyOct && [-12,12].some(d=>fr.present(m+d)))));
-      if(this.needOnset && ((fr && fr.onset && now-this.stepStart>60) || Virtual.lastPress > this.stepStart)) this.needOnset=false;
+      if(this.needOnset && ((fr && fr.onset && now-this.stepStart>60) || Keys.lastPress > this.stepStart)) this.needOnset=false;
       const ok = T.every(has);
       this.okFrames = ok? this.okFrames+1 : 0;
       if(ok && !this.needOnset && (this.okFrames>=2 || v.length)) { this.advance(); return; }
       // wrong notes: heard, not a target, not a harmonic of a target, not still ringing from the last step
       // Only notes struck just now count, and only if no target or still-ringing note explains them (octaves, harmonics, sub-harmonics).
-      const struck = (fr && now - Listener.lastOnset < 600) || now - Virtual.lastPress < 600;
+      const struck = (fr && now - Listener.lastOnset < 600) || now - Keys.lastPress < 600;
       const ref = [...T, ...this.exempt, ...Listener.preOnset];
       const REL = [0,12,19,24,28,31,34,36];
       const related = m => ref.some(n => REL.includes(n-m) || REL.includes(m-n));
-      const wrongNow = !struck ? [] : heard.filter(m => v.includes(m) ? !T.includes(m) : (!related(m) && !(anyOct && T.some(t=>(t-m)%12===0))));
+      const wrongNow = !struck ? [] : heard.filter(m => v.includes(m) ? (!T.includes(m) && ex.get(m) > this.stepStart) : (!related(m) && !(anyOct && T.some(t=>(t-m)%12===0))));
       for(const m of [...this.wrongFrames.keys()]) if(!wrongNow.includes(m)) this.wrongFrames.delete(m);
       wrongNow.forEach(m=>this.wrongFrames.set(m,(this.wrongFrames.get(m)||0)+1));
       const confirmed = [...this.wrongFrames].filter(([m,c])=>c===4 || (v.includes(m) && c===1)).map(([m])=>m);
@@ -697,7 +747,7 @@ Bus.on('model', m=>{
   // meter + heard
   const pct=Math.max(0,Math.min(100,(m.level+70)/60*100)); $('meterFill').style.width=pct+'%';
   const hn = m.heard.map(x=>noteName(x)); const cn = chordName(m.heard);
-  $('heardText').innerHTML = 'Heard: <b>'+(hn.length? hn.join(' ')+(cn?` (${cn})`:'') : (Listener.on? 'listening…' : 'microphone off'))+'</b>';
+  $('heardText').innerHTML = 'Heard: <b>'+(hn.length? hn.join(' ')+(cn?` (${cn})`:'') : (Listener.on? 'listening…' : Midi.on? 'waiting for MIDI…' : 'piano not connected'))+'</b>';
 });
 Bus.on('finished', r=>{
   $('dAcc').textContent=r.acc+'%'; $('dMis').textContent=r.mistakes; $('dTime').textContent=r.secs>=60? Math.floor(r.secs/60)+'m '+(r.secs%60)+'s' : r.secs+'s';
@@ -715,27 +765,67 @@ $('projBtn').onclick=()=>ProjectorView.open();
 $('setBtn').onclick=()=>{ $('sens').value=settings.sens; $('naming').value=settings.naming; $('anyOct').checked=settings.anyOct; $('tapSound').checked=settings.tapSound; $('showNext').checked=settings.showNext; try{ $('setDlg').showModal(); }catch(e){} };
 $('setClose').onclick=()=>{ settings.sens=+$('sens').value; settings.naming=$('naming').value; settings.anyOct=$('anyOct').checked; settings.tapSound=$('tapSound').checked; settings.showNext=$('showNext').checked; saveSettings(); $('setDlg').close(); lastPromptKey=''; renderLessonList(); Engine.publish(); };
 
-// microphone
+// input: MIDI, audio cable, or microphone
 let wakeLock=null;
-$('micBtn').onclick=async()=>{
-  if(Listener.on) return;
-  $('micBtn').textContent='Starting…';
+const keepAwake = async()=>{ try{ wakeLock = await navigator.wakeLock.request('screen'); }catch(e){} };
+function inputLabel(){
+  if(Midi.on) return Midi.names.length? 'MIDI: '+Midi.names[0] : 'MIDI: no piano found';
+  if(Listener.on) return settings.input==='line'? 'Listening (cable)' : 'Listening (mic)';
+  return 'Connect piano';
+}
+function refreshInput(){
+  $('micBtn').textContent = inputLabel();
+  $('micBtn').className = 'btn ' + ((Midi.on && Midi.names.length) || Listener.on ? 'live' : 'primary');
+  ['inMidi','inLine','inMic'].forEach(id=>$(id).setAttribute('aria-pressed', String(settings.input===({inMidi:'midi',inLine:'line',inMic:'mic'})[id] && (Midi.on||Listener.on))));
+}
+Bus.on('input', refreshInput);
+function inMsg(html){ $('inMsg').innerHTML=html||''; $('inMsg').hidden=!html; }
+async function fillDevices(){
   try{
-    await Listener.start();
-    $('micBtn').textContent='Listening'; $('micBtn').className='btn live'; $('micBanner').hidden=true;
-    try{ wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+    const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
+    $('devSel').innerHTML = devs.map((d,i)=>`<option value="${d.deviceId}">${(d.label||'Input '+(i+1)).replace(/</g,'&lt;')}</option>`).join('');
+    if(settings.deviceId && devs.some(d=>d.deviceId===settings.deviceId)) $('devSel').value=settings.deviceId;
+    $('devField').hidden = devs.length<2;
+  }catch(e){ $('devField').hidden=true; }
+}
+function micError(err){
+  if(!window.isSecureContext) return '<b>Audio input needs a secure web address.</b> Open the app from its https:// link. Until then you can practise by tapping the keys on screen.';
+  if(err && err.name==='NotAllowedError') return '<b>Microphone access was blocked.</b> On iPad: Settings › Safari › Microphone › Allow, then reload the page.';
+  return '<b>The audio input could not start.</b> Check the cable and try again, or tap the keys on screen.';
+}
+async function useAudio(kind){
+  settings.input=kind; saveSettings(); inMsg('');
+  try{
+    Midi.on=false;
+    await Listener.start(kind==='line'? settings.deviceId : undefined);
+    await fillDevices(); keepAwake();
+    if(kind==='line') inMsg('<b>Audio cable connected.</b> Turn the piano volume to about halfway. If notes are missed or extra notes appear, change Listening sensitivity in Settings.');
+  }catch(err){ inMsg(micError(err)); }
+  refreshInput();
+}
+async function useMidi(){
+  settings.input='midi'; saveSettings(); inMsg('');
+  try{
+    Listener.stop(); await Midi.start(); keepAwake();
+    inMsg(Midi.names.length? `<b>Connected to ${Midi.names.join(', ').replace(/</g,'&lt;')}.</b> Play a key to check: it lights up on the screen keyboard.` : '<b>MIDI is on, but no piano was found.</b> Connect the cable or pair the Bluetooth adapter, then play a key.');
   }catch(err){
-    $('micBtn').textContent='Turn on microphone';
-    const insecure = !window.isSecureContext;
-    $('micBanner').innerHTML = insecure
-      ? '<b>The microphone needs a secure web address.</b> Open the app from its https:// link. Until then you can practise by tapping the keys on screen.'
-      : (err && err.name==='NotAllowedError')
-        ? '<b>Microphone access was blocked.</b> On iPad: Settings › Safari › Microphone › Allow, then reload. In this preview, the microphone is not available; tap the keys on screen instead.'
-        : '<b>The microphone could not start here.</b> You can still practise by tapping the keys on screen.';
-    $('micBanner').hidden=false;
+    inMsg(err.name==='NoMIDI'
+      ? '<b>This browser can\'t read MIDI.</b> Safari on iPad doesn\'t support it. Open this page in a MIDI-capable browser app such as <i>Web MIDI Browser</i> from the App Store. On a computer, use Chrome or Edge.'
+      : '<b>MIDI access was refused.</b> Allow MIDI for this page in the browser settings and try again.');
   }
-};
-document.addEventListener('visibilitychange', async()=>{ if(document.visibilityState==='visible' && Listener.on){ try{ wakeLock = await navigator.wakeLock.request('screen'); }catch(e){} } });
+  refreshInput();
+}
+$('micBtn').onclick=()=>{ refreshInput(); try{ $('inDlg').showModal(); }catch(e){} };
+$('inMidi').onclick=useMidi;
+$('inLine').onclick=()=>useAudio('line');
+$('inMic').onclick=()=>useAudio('mic');
+$('devSel').onchange=()=>{ settings.deviceId=$('devSel').value; saveSettings(); useAudio(settings.input==='mic'?'mic':'line'); };
+$('inOff').onclick=()=>{ Listener.stop(); Midi.on=false; inMsg(''); refreshInput(); };
+$('inClose').onclick=()=>$('inDlg').close();
+Bus.on('input', ()=>{ if($('inDlg').open && Midi.on) inMsg(Midi.names.length? `<b>Connected to ${Midi.names.join(', ').replace(/</g,'&lt;')}.</b> Play a key to check: it lights up on the screen keyboard.` : '<b>MIDI is on, but no piano was found.</b> Connect the cable or pair the Bluetooth adapter, then play a key.'); });
+// reconnect MIDI on load if it was used last time (no permission prompt is needed for plain note input)
+if(settings.input==='midi' && Midi.supported()) Midi.start().then(refreshInput).catch(()=>{});
+document.addEventListener('visibilitychange', async()=>{ if(document.visibilityState==='visible' && (Listener.on||Midi.on)) keepAwake(); });
 
 // boot
 KeyboardView.init(); StaffView.init(); ProjectorView.init();
