@@ -59,6 +59,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .lesson-btn .t{flex:1;min-width:0}
 .lesson-btn .best{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .lesson-btn .best.done{color:var(--ok);font-weight:600}
+.add-song{color:var(--muted)}
+.add-msg{font-size:13px;color:var(--bad);padding:4px 10px}
 .hand-tag{font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px;letter-spacing:.04em}
 .hand-tag.R{color:var(--rh);background:color-mix(in srgb,var(--rh) 14%,transparent)}
 .hand-tag.L{color:var(--lh);background:color-mix(in srgb,var(--lh) 16%,transparent)}
@@ -136,6 +138,7 @@ dialog h2{font-family:var(--font-display);margin:0 0 4px;font-size:24px;letter-s
   </header>
   <div class="main">
     <nav id="lessons" class="lessons" aria-label="Lessons"></nav>
+    <input type="file" id="songFile" accept=".json,application/json" hidden>
     <section class="stage">
       <div class="prompt-row">
         <div class="prompt">
@@ -150,7 +153,8 @@ dialog h2{font-family:var(--font-display);margin:0 0 4px;font-size:24px;letter-s
             <button id="handR" aria-pressed="false">Right</button>
             <button id="handL" aria-pressed="false">Left</button>
           </div>
-          <button id="hearBtn" class="btn small">Hear it</button>
+          <button id="playBtn" class="btn small">▶ Play song</button>
+          <button id="hearBtn" class="btn small">Hear step</button>
           <button id="skipBtn" class="btn small">Skip</button>
           <button id="restartBtn" class="btn small">Restart</button>
         </div>
@@ -280,8 +284,11 @@ const Bus = { h:{}, on(t,f){ (this.h[t]=this.h[t]||[]).push(f); }, emit(t,d){ (t
 let actx = null;
 function audio(){ if(!actx){ actx = new (window.AudioContext||window.webkitAudioContext)(); } if(actx.state==='suspended') actx.resume(); return actx; }
 const Synth = {
+  nodes:[],
+  stopAll(){ this.nodes.forEach(o=>{ try{ o.stop(); }catch(e){} }); this.nodes=[]; },
   play(midis, dur=1.2, when=0, vel=0.22){
     const ctx = audio(); const t0 = ctx.currentTime + when;
+    if(this.nodes.length>400) this.nodes=this.nodes.slice(-200);
     for(const m of midis){
       const f = mtof(m), g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vel/Math.sqrt(midis.length), t0+0.008);
@@ -290,7 +297,7 @@ const Synth = {
       [[1,1],[2,.45],[3,.22],[4,.1]].forEach(([h,a])=>{
         if(f*h > ctx.sampleRate/2) return;
         const o = ctx.createOscillator(), ga = ctx.createGain(); o.frequency.value = f*h; ga.gain.value = a;
-        o.connect(ga).connect(g); o.start(t0); o.stop(t0+dur+0.05);
+        o.connect(ga).connect(g); o.start(t0); o.stop(t0+dur+0.05); this.nodes.push(o);
       });
     }
   }
@@ -405,7 +412,8 @@ const Keys = {
 /* ---------- Lessons ----------
    Step syntax:  "L:C3 R:C4,E4,G4 @C"   L/R = hand, comma = together, @ = label */
 const CH = {C:'C4,E4,G4', F:'F4,A4,C5', G:'G4,B4,D5', Am:'A4,C5,E5', Dm:'D4,F4,A4', Em:'E4,G4,B4'};
-const seq = (hand, s) => s.trim().split(/\s+/).map(n=>hand+':'+n);
+// "E4~1.5" = E4 lasting 1.5 beats (default 1). Durations only matter for the Play preview.
+const seq = (hand, s) => s.trim().split(/\s+/).map(n=>{ const [note,d]=n.split('~'); return hand+':'+note+(d?' ~'+d:''); });
 const LESSONS = [
   {group:'Find the notes', items:[
     {id:'rh-cg', title:'Right hand: C to G', hands:'R', desc:'Middle C position. Put your right thumb on middle C (C4) and one finger on each white key up to G. Notes appear in random order.', random:{pool:seq('R','C4 D4 E4 F4 G4'), count:12}},
@@ -432,10 +440,10 @@ const LESSONS = [
     {id:'ch-lh', title:'Left hand chords', hands:'L', desc:'C, F and G in the left hand. Fingers 5-3-1.', random:{pool:['L:C3,E3,G3 @C','L:F3,A3,C4 @F','L:G2,B2,D3 @G'], count:9}},
   ]},
   {group:'Melodies', items:[
-    {id:'mel-mary', title:'Mary Had a Little Lamb', hands:'R', desc:'Only three notes: C, D and E. Thumb on C.', steps:seq('R','E4 D4 C4 D4 E4 E4 E4 D4 D4 D4 E4 G4 G4 E4 D4 C4 D4 E4 E4 E4 E4 D4 D4 E4 D4 C4')},
-    {id:'mel-ode', title:'Ode to Joy', hands:'R', desc:'Beethoven. Right hand in C position, thumb on C4.', steps:seq('R','E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4 E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4')},
-    {id:'mel-twinkle', title:'Twinkle, Twinkle, Little Star', hands:'R', desc:'Stretch your pinky up to A for "little".', steps:seq('R','C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4 G4 G4 F4 F4 E4 E4 D4 G4 G4 F4 F4 E4 E4 D4 C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4')},
-    {id:'mel-frere', title:'Frère Jacques', hands:'R', desc:'Includes a dip down to G3 at the end. Move your thumb to reach it.', steps:seq('R','C4 D4 E4 C4 C4 D4 E4 C4 E4 F4 G4 E4 F4 G4 G4 A4 G4 F4 E4 C4 G4 A4 G4 F4 E4 C4 C4 G3 C4 C4 G3 C4')},
+    {id:'mel-mary', title:'Mary Had a Little Lamb', hands:'R', desc:'Only three notes: C, D and E. Thumb on C.', bpm:100, steps:seq('R','E4 D4 C4 D4 E4 E4 E4~2 D4 D4 D4~2 E4 G4 G4~2 E4 D4 C4 D4 E4 E4 E4 E4 D4 D4 E4 D4 C4~4')},
+    {id:'mel-ode', title:'Ode to Joy', hands:'R', desc:'Beethoven. Right hand in C position, thumb on C4.', bpm:100, steps:seq('R','E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4~1.5 D4~0.5 D4~2 E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4~1.5 C4~0.5 C4~2')},
+    {id:'mel-twinkle', title:'Twinkle, Twinkle, Little Star', hands:'R', desc:'Stretch your pinky up to A for "little".', bpm:100, steps:seq('R','C4 C4 G4 G4 A4 A4 G4~2 F4 F4 E4 E4 D4 D4 C4~2 G4 G4 F4 F4 E4 E4 D4~2 G4 G4 F4 F4 E4 E4 D4~2 C4 C4 G4 G4 A4 A4 G4~2 F4 F4 E4 E4 D4 D4 C4~2')},
+    {id:'mel-frere', title:'Frère Jacques', hands:'R', desc:'Includes a dip down to G3 at the end. Move your thumb to reach it.', bpm:100, steps:seq('R','C4 D4 E4 C4 C4 D4 E4 C4 E4 F4 G4~2 E4 F4 G4~2 G4~.75 A4~.25 G4~.5 F4~.5 E4 C4 G4~.75 A4~.25 G4~.5 F4~.5 E4 C4 C4 G3 C4~2 C4 G3 C4~2')},
   ]},
   {group:'Two hands', items:[
     {id:'two-pop', title:'Pop progression: C G Am F', hands:'B', desc:'The four chords behind hundreds of songs. Left hand plays the bass note, right hand plays the chord at the same time. Right hand barely moves.', steps:['L:C3 R:C4,E4,G4 @C','L:G2 R:B3,D4,G4 @G','L:A2 R:C4,E4,A4 @Am','L:F2 R:C4,F4,A4 @F','L:C3 R:C4,E4,G4 @C','L:G2 R:B3,D4,G4 @G','L:A2 R:C4,E4,A4 @Am','L:F2 R:C4,F4,A4 @F','L:C3 R:C4,E4,G4 @C']},
@@ -447,15 +455,34 @@ const LESSONS = [
     {id:'free', title:'Just listen', hands:'B', free:true, desc:'Play anything. The app shows the notes and chords it hears. Use this to check the microphone and adjust sensitivity in Settings.'},
   ]},
 ];
-const ALL = LESSONS.flatMap(g=>g.items);
+/* Songs you add yourself live on this device only (they are not part of the public site). */
+const MySongs = {
+  list(){ return Store.get('songs', []); },
+  add(song){
+    if(!song || !song.title || !Array.isArray(song.steps) || !song.steps.length) throw new Error('A song file needs a title and a list of steps.');
+    song.steps.forEach(parseStep);   // throws on a bad note name
+    const id = 'song-' + song.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    const item = {id, title:String(song.title), desc:String(song.desc||''), hands:['R','L','B'].includes(song.hands)? song.hands : 'B', bpm:+song.bpm||80, steps:song.steps.map(String)};
+    const list = this.list().filter(x=>x.id!==id); list.push(item); Store.set('songs', list); rebuildLessons(); return id;
+  },
+  remove(id){ Store.set('songs', this.list().filter(x=>x.id!==id)); rebuildLessons(); }
+};
+let ALL = [];
+function rebuildLessons(){
+  const i = LESSONS.findIndex(g=>g.mine); if(i>=0) LESSONS.splice(i,1);
+  const songs = MySongs.list(); if(songs.length) LESSONS.splice(LESSONS.length-1, 0, {group:'My songs', mine:true, items:songs});
+  ALL = LESSONS.flatMap(g=>g.items);
+}
+rebuildLessons();
 function parseStep(str){
-  const notes=[]; let label='';
+  const notes=[]; let label='', dur=1;
   for(const tok of str.trim().split(/\s+/)){
     if(tok[0]==='@'){ label = tok.slice(1); continue; }
+    if(tok[0]==='~'){ dur = parseFloat(tok.slice(1))||1; continue; }
     const [h, list] = tok.split(':');
     list.split(',').forEach(n=>notes.push({m:parseNote(n), h}));
   }
-  return {notes, label};
+  return {notes, label, dur};
 }
 
 /* ---------- Engine ---------- */
@@ -513,6 +540,7 @@ const Engine = {
     const ex = Keys.active(now, this.stepStart), v = [...ex.keys()];
     const heard = [...new Set([...(fr? fr.heard: []), ...v])].sort((a,b)=>a-b);
     this.heard = heard; this.level = fr? fr.level : -100;
+    if(Player.playing){ this.publish(now); return; }
     if(this.lesson && !this.lesson.free && !this.done && now > this.muteUntil){
       const T = this.targets();
       const anyOct = settings.anyOct && T.length>=3;
@@ -543,6 +571,12 @@ const Engine = {
     this.publish(now);
   },
   publish(now=performance.now()){
+    if(Player.playing){
+      const st=this.allSteps[Player.pos];
+      Bus.emit('model', {lesson:this.lesson, steps:this.allSteps, idx:Player.pos, done:false, free:false, playing:true,
+        targets: st? st.notes : [], next:[], heard:[], wrong:[], level:this.level, flash:false});
+      return;
+    }
     const cur = this.steps[this.idx], nxt = this.steps[this.idx+1];
     Bus.emit('model', {
       lesson:this.lesson, steps:this.steps, idx:this.idx, done:this.done, free:!!(this.lesson&&this.lesson.free),
@@ -550,6 +584,29 @@ const Engine = {
       next: (nxt && !this.done && settings.showNext)? nxt.notes : [],
       heard:this.heard, wrong:this.wrongNow, level:this.level, flash: now-this.flash < 350
     });
+  }
+};
+
+/* ---------- Player: hear the whole piece before practising it ---------- */
+const Player = {
+  playing:false, pos:0, timers:[],
+  toggle(){ this.playing? this.stop() : this.play(); },
+  play(){
+    const steps = Engine.allSteps; if(!steps || !steps.length) return;
+    const spb = 60/(Engine.lesson.bpm || 80);
+    this.playing = true; this.pos = 0; Bus.emit('player', true);
+    let t = 0.15;
+    steps.forEach((st,i)=>{
+      const d = (st.dur||1)*spb;
+      Synth.play(st.notes.map(n=>n.m), Math.max(0.35, d*0.95+0.25), t, 0.2);
+      this.timers.push(setTimeout(()=>{ this.pos=i; Engine.publish(); }, t*1000));
+      t += d;
+    });
+    this.timers.push(setTimeout(()=>this.stop(true), t*1000+300));
+  },
+  stop(ended){
+    this.timers.forEach(clearTimeout); this.timers=[]; if(!ended) Synth.stopAll();
+    this.playing=false; Engine.muteUntil = performance.now()+600; Bus.emit('player', false); Engine.publish();
   }
 };
 
@@ -714,9 +771,15 @@ function renderLessonList(){
   const best=Store.get('best',{}); const cur=Engine.lesson&&Engine.lesson.id;
   $('lessons').innerHTML = LESSONS.map(g=>`<div class="group"><h3>${g.group}</h3>${g.items.map(l=>{
     const b=best[l.id]; const tag = l.hands==='B'?'Both':l.hands==='R'?'RH':'LH';
-    return `<button class="lesson-btn ${l.id===cur?'active':''}" data-id="${l.id}"><span class="hand-tag ${l.hands}">${tag}</span><span class="t">${l.title}</span>${b!=null?`<span class="best ${b>=90?'done':''}">${b}%</span>`:''}</button>`;}).join('')}</div>`).join('');
+    return `<button class="lesson-btn ${l.id===cur?'active':''}" data-id="${l.id}"><span class="hand-tag ${l.hands}">${tag}</span><span class="t">${l.title}</span>${b!=null?`<span class="best ${b>=90?'done':''}">${b}%</span>`:''}</button>`;}).join('')}</div>`).join('')
+    + `<div class="group"><button class="lesson-btn add-song" id="addSong"><span class="hand-tag B">+</span><span class="t">Add a song file…</span></button><div class="add-msg" id="addMsg" hidden></div></div>`;
 }
-$('lessons').addEventListener('click', e=>{ const b=e.target.closest('.lesson-btn'); if(!b) return; Engine.hand='B'; Engine.load(b.dataset.id); $('lessons').classList.remove('open'); });
+$('lessons').addEventListener('click', e=>{ if(e.target.closest('#addSong')){ $('songFile').click(); return; } const b=e.target.closest('.lesson-btn'); if(!b) return; Engine.hand='B'; Engine.load(b.dataset.id); $('lessons').classList.remove('open'); });
+$('songFile').addEventListener('change', async e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  try{ const id = MySongs.add(JSON.parse(await f.text())); Engine.hand='B'; Engine.load(id); }
+  catch(err){ renderLessonList(); $('addMsg').textContent = 'Could not add that file. ' + (err && err.message || ''); $('addMsg').hidden=false; }
+});
 $('menuBtn').onclick=()=>$('lessons').classList.toggle('open');
 
 function setHandButtons(){
@@ -727,19 +790,20 @@ function setHandButtons(){
 
 Bus.on('lesson', l=>{
   $('lessonTitle').textContent=l.title; $('lessonDesc').textContent=l.desc||''; renderLessonList(); setHandButtons();
-  ['hearBtn','skipBtn','restartBtn'].forEach(id=>$(id).hidden=!!l.free);
+  if(Player.playing) Player.stop();
+  ['hearBtn','skipBtn','restartBtn','playBtn'].forEach(id=>$(id).hidden=!!l.free);
 });
 Bus.on('feedback', f=>{ $('feedback').textContent=f.text; $('feedback').className='feedback '+(f.cls||''); });
 let lastPromptKey='';
 Bus.on('model', m=>{
   // prompt
-  const key = m.lesson && (m.lesson.id+'|'+m.idx+'|'+m.done+'|'+m.steps.length+'|'+settings.naming);
+  const key = m.lesson && (m.lesson.id+'|'+m.idx+'|'+m.done+'|'+m.steps.length+'|'+settings.naming+'|'+!!m.playing);
   if(key!==lastPromptKey){
     lastPromptKey=key;
     if(m.free){ $('stepCount').textContent='Free play'; $('promptText').textContent='Play anything you like'; }
     else if(m.done){ $('stepCount').textContent=`${m.steps.length} of ${m.steps.length}`; $('promptText').textContent='Finished!'; }
     else {
-      const st=m.steps[m.idx]; $('stepCount').textContent=`Step ${m.idx+1} of ${m.steps.length}`;
+      const st=m.steps[m.idx]; $('stepCount').textContent=`${m.playing? 'Playing' : 'Step'} ${m.idx+1} of ${m.steps.length}`;
       const by={R:[],L:[]}; st.notes.forEach(n=>by[n.h].push(noteName(n.m)));
       const part=(h,word)=> by[h].length? `<span class="${h}">${word} ${st.label&&by[h].length>2? st.label+' ('+by[h].join(' ')+')' : by[h].join(' ')}</span>` : '';
       $('promptText').innerHTML = [part('L','Left'), part('R','Right')].filter(Boolean).join(' &nbsp;+&nbsp; ');
@@ -757,6 +821,8 @@ Bus.on('finished', r=>{
 });
 $('againBtn').onclick=()=>{ $('doneDlg').close(); Engine.load(Engine.lesson.id); };
 $('nextBtn').onclick=()=>{ $('doneDlg').close(); const i=ALL.indexOf(Engine.lesson); Engine.hand='B'; Engine.load(ALL[(i+1)%ALL.length].id); };
+$('playBtn').onclick=()=>Player.toggle();
+Bus.on('player', on=>{ $('playBtn').textContent = on? '■ Stop' : '▶ Play song'; lastPromptKey=''; });
 $('hearBtn').onclick=()=>{ const T=Engine.targets(); if(!T.length) return; Synth.play(T,1.2); Engine.muteUntil=performance.now()+1500; };
 $('skipBtn').onclick=()=>Engine.skip();
 $('restartBtn').onclick=()=>Engine.load(Engine.lesson.id);
