@@ -765,7 +765,7 @@ function renderLessonList(){
 $('lessons').addEventListener('click', e=>{ if(e.target.closest('#addSong')){ $('songFile').click(); return; } const b=e.target.closest('.lesson-btn'); if(!b) return; Engine.hand='B'; Engine.load(b.dataset.id); $('lessons').classList.remove('open'); });
 $('songFile').addEventListener('change', async e=>{
   const f=e.target.files[0]; e.target.value=''; if(!f) return;
-  try{ const id = MySongs.add(JSON.parse(await f.text())); Engine.hand='B'; Engine.load(id); }
+  try{ const data = JSON.parse(await f.text()); const ids = (Array.isArray(data)? data : [data]).map(x=>MySongs.add(x)); Engine.hand='B'; Engine.load(ids[0]); }
   catch(err){ renderLessonList(); $('addMsg').textContent = 'Could not add that file. ' + (err && err.message || ''); $('addMsg').hidden=false; }
 });
 $('menuBtn').onclick=()=>$('lessons').classList.toggle('open');
