@@ -199,6 +199,7 @@ dialog h2{font-family:var(--font-display);margin:0 0 4px;font-size:24px;letter-s
   <label class="check"><input type="checkbox" id="anyOct"> Accept chords in any octave</label>
   <label class="check"><input type="checkbox" id="tapSound" checked> Play a sound when I tap a key on screen</label>
   <label class="check"><input type="checkbox" id="showNext" checked> Show the next notes faintly on the keyboard</label>
+  <label class="check"><input type="checkbox" id="full88"> Show all 88 keys on the screen keyboard</label>
   <div class="row"><button class="btn primary" id="setClose">Done</button></div>
 </dialog>
 
@@ -232,7 +233,7 @@ const Store = {
   get(k, d){ try{ const v = localStorage.getItem('pc.'+k); return v==null? d : JSON.parse(v); }catch(e){ return d; } },
   set(k, v){ try{ localStorage.setItem('pc.'+k, JSON.stringify(v)); }catch(e){} }
 };
-const settings = Object.assign({input:'', deviceId:'', sens:6, naming:'letters', anyOct:false, tapSound:true, showNext:true}, Store.get('settings', {}));
+const settings = Object.assign({full88:window.innerWidth>=1000, input:'', deviceId:'', sens:6, naming:'letters', anyOct:false, tapSound:true, showNext:true}, Store.get('settings', {}));
 const saveSettings = () => Store.set('settings', settings);
 
 /* ---------- Music helpers ---------- */
@@ -569,7 +570,7 @@ const KeyboardView = {
     const narrow = this.cv.clientWidth < 600;
     const minSpan = narrow? 24 : 36;
     while(hi-lo < minSpan){ if(lo>36) lo-=12; else hi+=12; }
-    if(narrow && hi-lo>24 && ms.length){ /* keep small screens readable */ }
+    if(settings.full88){ lo=21; hi=108; }   // all 88 keys, like the real piano (A0 to C8)
     this.lo=lo; this.hi=hi; this.draw();
   },
   draw(){
@@ -750,8 +751,8 @@ $('restartBtn').onclick=()=>Engine.load(Engine.lesson.id);
 $('projBtn').onclick=()=>ProjectorView.open();
 
 // settings dialog
-$('setBtn').onclick=()=>{ $('sens').value=settings.sens; $('naming').value=settings.naming; $('anyOct').checked=settings.anyOct; $('tapSound').checked=settings.tapSound; $('showNext').checked=settings.showNext; try{ $('setDlg').showModal(); }catch(e){} };
-$('setClose').onclick=()=>{ settings.sens=+$('sens').value; settings.naming=$('naming').value; settings.anyOct=$('anyOct').checked; settings.tapSound=$('tapSound').checked; settings.showNext=$('showNext').checked; saveSettings(); $('setDlg').close(); lastPromptKey=''; renderLessonList(); Engine.publish(); };
+$('setBtn').onclick=()=>{ $('sens').value=settings.sens; $('naming').value=settings.naming; $('anyOct').checked=settings.anyOct; $('tapSound').checked=settings.tapSound; $('showNext').checked=settings.showNext; $('full88').checked=settings.full88; try{ $('setDlg').showModal(); }catch(e){} };
+$('setClose').onclick=()=>{ settings.sens=+$('sens').value; settings.naming=$('naming').value; settings.anyOct=$('anyOct').checked; settings.tapSound=$('tapSound').checked; settings.showNext=$('showNext').checked; settings.full88=$('full88').checked; saveSettings(); KeyboardView.fitRange(); $('setDlg').close(); lastPromptKey=''; renderLessonList(); Engine.publish(); };
 
 // input: MIDI, audio cable, or microphone
 let wakeLock=null;
