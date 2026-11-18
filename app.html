@@ -59,6 +59,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
 .lesson-title{font-family:var(--font-display);font-size:15px;font-weight:500;color:var(--muted);margin-top:2px}
 .big{font-family:var(--font-display);font-weight:700;font-size:clamp(26px,4.2vw,40px);letter-spacing:-.02em;line-height:1.1;margin-top:6px;text-wrap:balance}
+.big sup.fg{font-size:.5em;font-weight:600;margin-left:2px;opacity:.85}
 .big .R{color:var(--rh)} .big .L{color:var(--lh)}
 .feedback{margin-top:8px;min-height:22px;font-weight:500;color:var(--muted)}
 .feedback.ok{color:var(--ok)} .feedback.bad{color:var(--bad)}
@@ -203,6 +204,7 @@ dialog h2{font-family:var(--font-display);margin:0 0 4px;font-size:24px;letter-s
   <label class="check"><input type="checkbox" id="anyOct"> Accept chords in any octave</label>
   <label class="check"><input type="checkbox" id="tapSound" checked> Play a sound when I tap a key on screen</label>
   <label class="check"><input type="checkbox" id="showNext" checked> Show the next notes faintly on the keyboard</label>
+  <label class="check"><input type="checkbox" id="showFingers" checked> Show finger numbers (1 = thumb, 5 = pinky)</label>
   <label class="check"><input type="checkbox" id="full88"> Show all 88 keys on the screen keyboard</label>
   <div class="row"><button class="btn primary" id="setClose">Done</button></div>
 </dialog>
@@ -237,7 +239,7 @@ const Store = {
   get(k, d){ try{ const v = localStorage.getItem('pc.'+k); return v==null? d : JSON.parse(v); }catch(e){ return d; } },
   set(k, v){ try{ localStorage.setItem('pc.'+k, JSON.stringify(v)); }catch(e){} }
 };
-const settings = Object.assign({full88:window.innerWidth>=1000, input:'', deviceId:'', sens:6, naming:'letters', anyOct:false, tapSound:true, showNext:true}, Store.get('settings', {}));
+const settings = Object.assign({showFingers:true, full88:window.innerWidth>=1000, input:'', deviceId:'', sens:6, naming:'letters', anyOct:false, tapSound:true, showNext:true}, Store.get('settings', {}));
 const saveSettings = () => Store.set('settings', settings);
 
 /* ---------- Music helpers ---------- */
@@ -416,9 +418,9 @@ const LESSONS = [
     {id:'ff-parallel', title:'Hands together, parallel', hands:'B', desc:'Left hand one octave lower, both hands move up together. Left uses fingers 5-4-3-2-1 while right uses 1-2-3-4-5.', steps:['L:C3 R:C4','L:D3 R:D4','L:E3 R:E4','L:F3 R:F4','L:G3 R:G4','L:F3 R:F4','L:E3 R:E4','L:D3 R:D4','L:C3 R:C4']},
   ]},
   {group:'Scales', items:[
-    {id:'sc-c-rh', title:'C major, right hand', hands:'R', desc:'Fingering 1 2 3, thumb under to F, then 1 2 3 4 5. Coming down, finger 3 crosses over the thumb onto E.', steps:seq('R','C4 D4 E4 F4 G4 A4 B4 C5 B4 A4 G4 F4 E4 D4 C4')},
-    {id:'sc-c-lh', title:'C major, left hand', hands:'L', desc:'Fingering 5 4 3 2 1, then finger 3 crosses over to A, then 2 1. Reverse on the way down.', steps:seq('L','C3 D3 E3 F3 G3 A3 B3 C4 B3 A3 G3 F3 E3 D3 C3')},
-    {id:'sc-g-rh', title:'G major, right hand', hands:'R', desc:'Like C major, but F is always F sharp (the black key).', steps:seq('R','G4 A4 B4 C5 D5 E5 F#5 G5 F#5 E5 D5 C5 B4 A4 G4')},
+    {id:'sc-c-rh', title:'C major, right hand', hands:'R', desc:'Fingering 1 2 3, thumb under to F, then 1 2 3 4 5. Coming down, finger 3 crosses over the thumb onto E.', steps:seq('R','C4/1 D4/2 E4/3 F4/1 G4/2 A4/3 B4/4 C5/5 B4/4 A4/3 G4/2 F4/1 E4/3 D4/2 C4/1')},
+    {id:'sc-c-lh', title:'C major, left hand', hands:'L', desc:'Fingering 5 4 3 2 1, then finger 3 crosses over to A, then 2 1. Reverse on the way down.', steps:seq('L','C3/5 D3/4 E3/3 F3/2 G3/1 A3/3 B3/2 C4/1 B3/2 A3/3 G3/1 F3/2 E3/3 D3/4 C3/5')},
+    {id:'sc-g-rh', title:'G major, right hand', hands:'R', desc:'Like C major, but F is always F sharp (the black key).', steps:seq('R','G4/1 A4/2 B4/3 C5/1 D5/2 E5/3 F#5/4 G5/5 F#5/4 E5/3 D5/2 C5/1 B4/3 A4/2 G4/1')},
   ]},
   {group:'Chords', items:[
     {id:'ch-c', title:'C, F and G chords', hands:'R', desc:'The three most useful chords. Fingers 1-3-5, all keys pressed at once. Play skip-a-key shapes.', random:{pool:['R:'+CH.C+' @C','R:'+CH.F+' @F','R:'+CH.G+' @G'], count:9}},
@@ -468,10 +470,75 @@ function parseStep(str){
     if(tok[0]==='@'){ label = tok.slice(1); continue; }
     if(tok[0]==='~'){ dur = parseFloat(tok.slice(1))||1; continue; }
     const [h, list] = tok.split(':');
-    list.split(',').forEach(n=>notes.push({m:parseNote(n), h}));
+    list.split(',').forEach(n=>{ const [nn,f]=n.split('/'); const note={m:parseNote(nn), h}; if(f) note.fix=+f; notes.push(note); });
   }
   return {notes, label, dur};
 }
+
+/* ---------- Fingering ----------
+   Suggests a finger (1 thumb … 5 pinky) for every note, per hand, by
+   finding the cheapest path through all finger choices (dynamic programming).
+   Costs favour one finger per neighbouring key, thumb-under / finger-over
+   only where pianists use them, no thumbs on black keys, and few hand jumps.
+   A note written as "E4/3" keeps the finger given.                       */
+const Fingering = (()=>{
+  const E=[0,0,2,4,5,7];                       // comfortable distance from thumb, in semitones
+  const MAX={'1,2':5,'1,3':7,'1,4':9,'1,5':12,'2,3':3,'2,4':5,'2,5':7,'3,4':3,'3,5':5,'4,5':3};
+  const combos=(k)=>{ const out=[]; const rec=(start,acc)=>{ if(acc.length===k){ out.push(acc.slice()); return; } for(let f=start;f<=5;f++){ acc.push(f); rec(f+1,acc); acc.pop(); } }; rec(1,[]); return out; };
+  const anchor=(ns,fs,h)=> ns.reduce((a,n,i)=>a+(h==='R'? n-E[fs[i]] : n+E[fs[i]]),0)/ns.length;
+  function states(notes,h){
+    const ms=notes.map(n=>n.m).sort((a,b)=>a-b), k=Math.min(ms.length,5);
+    const byNote=new Map(notes.map(n=>[n.m,n.fix]));
+    return combos(k).map(c=>{ const fs = h==='R'? c : c.slice().reverse(); return {ms:ms.slice(0,k), fs}; })
+      .filter(st=>st.ms.every((m,i)=>!byNote.get(m) || byNote.get(m)===st.fs[i]));
+  }
+  function nodeCost(st){
+    let c=0;
+    st.ms.forEach((m,i)=>{ if(isBlack(m) && st.fs[i]===1) c+= st.ms.length===1? 2.5 : 1.5; if(isBlack(m) && st.fs[i]===5) c+=0.5; });
+    for(let i=1;i<st.ms.length;i++){
+      const lo=Math.min(st.fs[i-1],st.fs[i]), hi=Math.max(st.fs[i-1],st.fs[i]), d=st.ms[i]-st.ms[i-1];
+      c += Math.abs(d-(E[hi]-E[lo]))*0.5 + Math.max(0,d-MAX[lo+','+hi])*3;
+    }
+    if(st.ms.length===3 && st.ms[2]-st.ms[0]<=8 && !(st.fs.includes(1)&&st.fs.includes(3)&&st.fs.includes(5))) c+=1;  // triads: 1-3-5
+    return c;
+  }
+  function moveCost(a,b,h){
+    if(a.ms.length===1 && b.ms.length===1){
+      const f1=a.fs[0], f2=b.fs[0], d0=b.ms[0]-a.ms[0], d = h==='R'? d0 : -d0;
+      if(d===0) return f1===f2? 0 : 2.5;
+      if(f1===f2) return 8;
+      const df=f2-f1;
+      if(Math.sign(d)===Math.sign(df)){
+        const lo=Math.min(f1,f2), hi=Math.max(f1,f2), ad=Math.abs(d);
+        return Math.abs(ad-(E[hi]-E[lo]))*0.7 + Math.max(0,ad-MAX[lo+','+hi])*3;
+      }
+      if(d>0 && f2===1 && f1>=2 && f1<=4 && d<=5) return 2.2 + (f1===4?0.8:0) + Math.abs(d-1.5)*0.3;   // thumb under
+      if(d<0 && f1===1 && f2>=2 && f2<=4 && -d<=5) return 2.2 + (f2===4?0.8:0) + Math.abs(-d-1.5)*0.3; // finger over
+      return 14;
+    }
+    return Math.abs(anchor(a.ms,a.fs,h)-anchor(b.ms,b.fs,h))*0.6;
+  }
+  function assign(steps){
+    for(const h of ['R','L']){
+      const seqs = steps.map(s=>s.notes.filter(n=>n.h===h)).filter(ns=>ns.length);
+      if(!seqs.length) continue;
+      const S = seqs.map(ns=>{ const st=states(ns,h); return st.length? st : states(ns.map(n=>({m:n.m})),h); });
+      let cost=S[0].map(nodeCost), back=[];
+      for(let i=1;i<S.length;i++){
+        const nc=[], bk=[];
+        S[i].forEach(b=>{ let best=Infinity, arg=0; S[i-1].forEach((a,j)=>{ const v=cost[j]+moveCost(a,b,h); if(v<best){best=v;arg=j;} }); nc.push(best+nodeCost(b)); bk.push(arg); });
+        cost=nc; back.push(bk);
+      }
+      let j=cost.indexOf(Math.min(...cost));
+      for(let i=S.length-1;i>=0;i--){
+        const st=S[i][j]; seqs[i].forEach(n=>{ const k=st.ms.indexOf(n.m); n.f = k>=0? st.fs[k] : undefined; });
+        if(i>0) j=back[i-1][j];
+      }
+    }
+    return steps;
+  }
+  return {assign};
+})();
 
 /* ---------- Engine ---------- */
 const Engine = {
@@ -482,7 +549,7 @@ const Engine = {
     this.lesson = l; Store.set('lastLesson', l.id);
     let raw = l.steps || [];
     if(l.random){ raw=[]; let prev=null; for(let i=0;i<l.random.count;i++){ let s; do{ s=l.random.pool[Math.floor(Math.random()*l.random.pool.length)]; }while(s===prev && l.random.pool.length>1); raw.push(s); prev=s; } }
-    this.allSteps = raw.map(parseStep);
+    this.allSteps = Fingering.assign(raw.map(parseStep));
     if(l.hands !== 'B') this.hand = 'B';
     this.applyHand(); Bus.emit('lesson', l);
   },
@@ -637,6 +704,7 @@ const KeyboardView = {
     const M=this.model||{targets:[],next:[],heard:[],wrong:[]};
     const col={R:css('--rh'),L:css('--lh'),ok:css('--ok'),bad:css('--bad'),ivory:css('--ivory'),ebony:css('--ebony'),edge:css('--key-edge')};
     const tgt=new Map(M.targets.map(n=>[n.m,n.h])), nxt=new Map(M.next.map(n=>[n.m,n.h]));
+    const fing=new Map(M.targets.map(n=>[n.m,n.f]));
     const heard=new Set(M.heard), wrong=new Set(M.wrong);
     const keys=keyLayout(this.lo,this.hi,W), bh=H*0.62;
     const fillFor=k=>{
@@ -659,8 +727,17 @@ const KeyboardView = {
       const cx=k.x+k.w/2, cy=k.black? bh-k.w*0.75 : H-Math.max(16,k.w*0.55);
       if(nxt.has(k.m) && !tgt.has(k.m)){ c.strokeStyle=col[nxt.get(k.m)]; c.lineWidth=2.5; c.beginPath(); c.arc(cx,cy,k.w*0.28,0,7); c.stroke(); }
       if(tgt.has(k.m)){
-        c.font=`600 ${fs}px Inter, system-ui, sans-serif`; c.fillStyle=k.black? '#fff' : '#fff';
-        c.fillText(noteName(k.m, false), cx, cy);
+        const f = fing.get(k.m), r = Math.max(8, Math.min(k.w*0.42, 16));
+        if(f && settings.showFingers){
+          c.fillStyle='#fff'; c.beginPath(); c.arc(cx,cy,r,0,7); c.fill();
+          c.font=`700 ${Math.round(r*1.25)}px Inter, system-ui, sans-serif`; c.fillStyle=col[tgt.get(k.m)];
+          c.fillText(String(f), cx, cy+1);
+          c.font=`600 ${Math.max(9,fs-2)}px Inter, system-ui, sans-serif`; c.fillStyle='#fff';
+          c.fillText(noteName(k.m, false), cx, cy - r - Math.max(9,fs-2)*0.9);
+        } else {
+          c.font=`600 ${fs}px Inter, system-ui, sans-serif`; c.fillStyle='#fff';
+          c.fillText(noteName(k.m, false), cx, cy);
+        }
       } else if(!k.black && k.m%12===0){
         c.font=`500 ${Math.max(9,fs-3)}px Inter, system-ui, sans-serif`; c.fillStyle='#8A8F98';
         c.fillText(noteName(k.m), cx, H-12);
@@ -748,6 +825,12 @@ const ProjectorView = {
       const g=c.createLinearGradient(0,0,0,h); g.addColorStop(0,fill); g.addColorStop(1,'rgba(0,0,0,0)');
       c.globalAlpha=alpha; c.fillStyle=g; c.fillRect(x+2,0,k.w-4,h); c.globalAlpha=1;
     }
+    // finger numbers near the keys
+    if(settings.showFingers) for(const n of M.targets){ const k=keys.find(k=>k.m===n.m); if(!k||!n.f) continue;
+      const r=Math.min(k.w*0.45,28), cx=mx+k.x+k.w/2, cy=(k.black? H*0.62 : H)-r-8;
+      c.fillStyle='#fff'; c.beginPath(); c.arc(cx,cy,r,0,7); c.fill();
+      c.save(); c.translate(cx,cy); if(this.cfg.mirror) c.scale(-1,1); if(this.cfg.flip) c.scale(1,-1);
+      c.fillStyle='#000'; c.font=`700 ${Math.round(r*1.2)}px Inter, system-ui, sans-serif`; c.textAlign='center'; c.textBaseline='middle'; c.fillText(String(n.f),0,1); c.restore(); }
     // calibration ticks at every C so you can line the columns up with the keys
     c.fillStyle='#333'; keys.filter(k=>!k.black&&k.m%12===0).forEach(k=>c.fillRect(mx+k.x,H-6,2,6));
   }
@@ -785,14 +868,14 @@ Bus.on('feedback', f=>{ $('feedback').textContent=f.text; $('feedback').classNam
 let lastPromptKey='';
 Bus.on('model', m=>{
   // prompt
-  const key = m.lesson && (m.lesson.id+'|'+m.idx+'|'+m.done+'|'+m.steps.length+'|'+settings.naming+'|'+!!m.playing);
+  const key = m.lesson && (m.lesson.id+'|'+m.idx+'|'+m.done+'|'+m.steps.length+'|'+settings.naming+'|'+!!m.playing+'|'+settings.showFingers);
   if(key!==lastPromptKey){
     lastPromptKey=key;
     if(m.free){ $('stepCount').textContent='Free play'; $('promptText').textContent='Play anything you like'; }
     else if(m.done){ $('stepCount').textContent=`${m.steps.length} of ${m.steps.length}`; $('promptText').textContent='Finished!'; }
     else {
       const st=m.steps[m.idx]; $('stepCount').textContent=`${m.playing? 'Playing' : 'Step'} ${m.idx+1} of ${m.steps.length}`;
-      const by={R:[],L:[]}; st.notes.forEach(n=>by[n.h].push(noteName(n.m)));
+      const by={R:[],L:[]}; [...st.notes].sort((a,b)=>a.m-b.m).forEach(n=>by[n.h].push(noteName(n.m)+(n.f&&settings.showFingers? `<sup class="fg">${n.f}</sup>`:'')));
       const part=(h,word)=> by[h].length? `<span class="${h}">${word} ${st.label&&by[h].length>2? st.label+' ('+by[h].join(' ')+')' : by[h].join(' ')}</span>` : '';
       $('promptText').innerHTML = [part('L','Left'), part('R','Right')].filter(Boolean).join(' &nbsp;+&nbsp; ');
     }
@@ -817,8 +900,8 @@ $('restartBtn').onclick=()=>Engine.load(Engine.lesson.id);
 $('projBtn').onclick=()=>ProjectorView.open();
 
 // settings dialog
-$('setBtn').onclick=()=>{ $('sens').value=settings.sens; $('naming').value=settings.naming; $('anyOct').checked=settings.anyOct; $('tapSound').checked=settings.tapSound; $('showNext').checked=settings.showNext; $('full88').checked=settings.full88; try{ $('setDlg').showModal(); }catch(e){} };
-$('setClose').onclick=()=>{ settings.sens=+$('sens').value; settings.naming=$('naming').value; settings.anyOct=$('anyOct').checked; settings.tapSound=$('tapSound').checked; settings.showNext=$('showNext').checked; settings.full88=$('full88').checked; saveSettings(); KeyboardView.fitRange(); $('setDlg').close(); lastPromptKey=''; renderLessonList(); Engine.publish(); };
+$('setBtn').onclick=()=>{ $('sens').value=settings.sens; $('naming').value=settings.naming; $('anyOct').checked=settings.anyOct; $('tapSound').checked=settings.tapSound; $('showNext').checked=settings.showNext; $('full88').checked=settings.full88; $('showFingers').checked=settings.showFingers; try{ $('setDlg').showModal(); }catch(e){} };
+$('setClose').onclick=()=>{ settings.sens=+$('sens').value; settings.naming=$('naming').value; settings.anyOct=$('anyOct').checked; settings.tapSound=$('tapSound').checked; settings.showNext=$('showNext').checked; settings.full88=$('full88').checked; settings.showFingers=$('showFingers').checked; saveSettings(); KeyboardView.fitRange(); $('setDlg').close(); lastPromptKey=''; renderLessonList(); Engine.publish(); };
 
 // input: MIDI, audio cable, or microphone
 let wakeLock=null;
